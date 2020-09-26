@@ -8,4 +8,6 @@ edition = "2018"
 
 [dependencies]
 libc = "0.2.0"
-nfc = "0.1.11"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["winuser","winscard","winerror"] }

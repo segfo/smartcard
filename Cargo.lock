@@ -11,24 +11,27 @@ name = "nfc"
 version = "0.1.0"
 dependencies = [
  "libc",
- "nfc 0.1.11",
+ "winapi",
 ]
 
 [[package]]
-name = "nfc"
-version = "0.1.11"
+name = "winapi"
+version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcd1d55da90d5ed2b7be994af6314f35ba7b557d0808e098120c70bf4dcf4ec0"
+checksum = "5c839a674fcd7a98952e593242ea400abe93992746761e38641405d28b00f419"
 dependencies = [
- "libc",
- "nfc-sys",
+ "winapi-i686-pc-windows-gnu",
+ "winapi-x86_64-pc-windows-gnu",
 ]
 
 [[package]]
-name = "nfc-sys"
-version = "0.1.5"
+name = "winapi-i686-pc-windows-gnu"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98e81aa40741063239b7df1b7c7a4b856b6bc0a0fd7dcb36211923a519fcdd8e"
-dependencies = [
- "libc",
-]
+checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
+
+[[package]]
+name = "winapi-x86_64-pc-windows-gnu"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
