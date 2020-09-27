@@ -7,7 +7,7 @@ use nfc_impl::NfcFactory;
 //use crate::libnfc::*;
 
 fn main() {
-    let nfc:Box<smart_card::Smartcard> = NfcFactory::create_nfc_instance(nfc_impl::FactoryType::WindowsScardAPI);
-    
+    let mut nfc:Box<smart_card::Smartcard> = NfcFactory::create_nfc_instance(nfc_impl::FactoryType::WindowsScardAPI);
+    nfc.connect_reader(smart_card::SmartcardConnectMethod::UserPrompt).unwrap();
     println!("version: {}", nfc.version_str().unwrap());
 }
