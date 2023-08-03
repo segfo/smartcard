@@ -58,10 +58,9 @@ fn show_card_info(nfc: &mut Box<dyn Smartcard>, card_type: CardType) {
     println!("[Answer to response(ATR)]");
     println!("    カード名: {}", atr.card_name.as_ref().unwrap().0);
     println!(
-        "    アプリケーションプロバイダID(RID): {}",
-        hex_dump(atr.rid.as_ref().unwrap())
+        "    管理情報バイト: {}",
+        hex_dump(atr.historical_data.as_ref().unwrap())
     );
-    println!("    標準： {:02x}", atr.ss);
     let apdu = apdu_iso7816::ApduBuilder::new().get_serial().build();
     let mode_str = match nfc.config_protocol(ProtocolType::InActive) {
         Some(ProtocolType::T1) => "T1(ブロック転送モード)",

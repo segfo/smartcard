@@ -5,8 +5,7 @@ use crate::apdu_iso7816;
 #[derive(Debug, Clone)]
 pub struct AnswerToReset {
     pub raw_atr: Option<Vec<u8>>,
-    pub ss: u8,
-    pub rid: Option<Vec<u8>>, // Registered application provider identifier
+    pub historical_data: Option<Vec<u8>>, // historical data
     pub card_name: Option<(String, CardName)>,
 }
 
@@ -25,7 +24,11 @@ pub enum CardName {
     TopazJewel,
     Felica,
     Jcop30,
-    UnknownTagName,
+    JpPublicTransitIc,
+    JpMynaCard,
+    JpDrivingLicenseCard,
+    OtherTag,
+    UnknownTagName
 }
 #[derive(Debug, Clone, PartialEq)]
 pub enum CardType {
@@ -117,11 +120,10 @@ impl AnswerToReset {
                 ATRParseErrorCode::InvalidHeader(atr[0]),
             )));
         }
-        let (rid, ss, card_name) = AnswerToReset::parse_atr(atr);
+        let (historical_data, card_name) = AnswerToReset::parse_atr(atr);
         Ok(AnswerToReset {
             raw_atr: Some(atr.to_vec()),
-            ss: ss,
-            rid: Some(rid),
+            historical_data: Some(historical_data),
             card_name: Some(card_name),
         })
     }
@@ -131,10 +133,31 @@ impl AnswerToReset {
             None => None,
         }
     }
-    fn parse_atr(atr: &[u8; 32]) -> (Vec<u8>, u8, (String, CardName)) {
-        let rid = atr[7..7 + 5].to_vec();
-        let unknown_tag = "Unknown Tag Name";
-        let ss = atr[12];
+    const unknown_tag: &str = "Unknown Tag Name";
+    fn next_tables(atr: u8) -> (bool, usize) {
+        let flags = atr >> 0x04 & 0x0f;
+        let mut count = 0;
+        for i in 0..4 {
+            if (flags >> i) & 1 == 1 {
+                count += 1;
+            }
+        }
+        (flags & 0x8 == 0x08, count)
+    }
+    fn parse_atr(atr: &[u8; 32]) -> (Vec<u8>, (String, CardName)) {
+        let historical_bytes = (atr[1] & 0x0f) as usize;
+        // 真面目にT0をパースしないとridは取得できない。
+        // カード種別を探索するために必須なのでRIDとる。
+        let mut index = 1;
+        loop {
+            let (next_exists, count) = AnswerToReset::next_tables(atr[index]);
+            index += count;
+            if !next_exists {
+                index += 1;
+                break;
+            }
+        }
+        let historical_data = atr[index..index + historical_bytes].to_vec();
         let card_name = match (atr[13], atr[14]) {
             (0x00, v) => match v {
                 0x01 => ("MIFARE Classic 1K", CardName::MifareClassic1k),
@@ -148,17 +171,31 @@ impl AnswerToReset {
                 0x39 => ("MIFARE Plus SL2 4K", CardName::MifarePlusSl14k),
                 0x3A => ("MIFARE Ultralight C", CardName::MifareUltralightC),
                 0x30 => ("Topaz/Jewel", CardName::TopazJewel),
-                0x3B => ("FeliCa", CardName::Felica),
-                _ => (unknown_tag, CardName::UnknownTagName),
+                0x3B => AnswerToReset::lookup_to_histdata(historical_data.clone()),//("FeliCa", CardName::Felica),
+                _ => AnswerToReset::lookup_to_histdata(historical_data.clone()),
             },
             (0xFF, 28) => ("JCOP 30", CardName::Jcop30),
-            _ => (unknown_tag, CardName::UnknownTagName),
+            _ => (Self::unknown_tag, CardName::UnknownTagName),
         };
-        (rid, ss, (card_name.0.to_owned(), card_name.1))
+        (historical_data, (card_name.0.to_owned(), card_name.1))
     }
-    pub fn rid_to_string(&self) -> String {
+    const LOOKUP_TABLE:&'static[(&'static[u8],&'static str,CardName)] = &[
+        (&[0x00,0x00,0x00,0x00,0x91,0x81,0xc1,0x00],"Driving License card of Japan",CardName::JpDrivingLicenseCard),
+        (&[0x00,0x00,0x41,0xe0,0xb3,0x81,0xa1,0x00],"ID card issued by Japan government(aka My-number card)",CardName::JpMynaCard),
+        (&[0x00,0x00,0x05,0xE0,0xB3,0x81,0xA1,0x00],"Japanese JPKI card (aka JINC card)",CardName::JpMynaCard),
+        (&[0x80,0x4f,0x0c,0xa0,0x00,0x00,0x03,0x06,0x11,0x00,0x3b,0x00,0x00,0x00,0x00],"public transit card (Japan IC System)",CardName::JpPublicTransitIc)
+    ];
+    fn lookup_to_histdata(histrical_data: Vec<u8>) -> (&'static str, CardName) {
+        for search in Self::LOOKUP_TABLE{
+            if histrical_data == search.0{
+                return (search.1,search.2.clone())
+            }
+        }
+        (Self::unknown_tag, CardName::UnknownTagName)
+    }
+    pub fn historical_data_to_string(&self) -> String {
         let mut s = self
-            .rid
+            .historical_data
             .as_ref()
             .unwrap()
             .iter()
@@ -173,8 +210,7 @@ impl Default for AnswerToReset {
     fn default() -> Self {
         AnswerToReset {
             raw_atr: None,
-            ss: 0,
-            rid: None,
+            historical_data: None,
             card_name: None,
         }
     }
@@ -184,9 +220,8 @@ impl std::fmt::Display for AnswerToReset {
         let s = self.card_name.as_ref().unwrap();
         write!(
             f,
-            "ss: {}\nrid: {}\ncard_name: {}",
-            self.ss,
-            self.rid_to_string(),
+            "rid: {}\ncard_name: {}",
+            self.historical_data_to_string(),
             s.0
         )
     }
@@ -236,4 +271,19 @@ pub trait MifareExt {
         key_no: u8,
     ) -> Result<(), Box<dyn std::error::Error>>;
     // MIFARE 1K/4K への認証
+}
+
+#[test]
+fn atr_parse1(){
+    let atr=[0x3B,0x88,0x8E,0xFE,0x53,0x2A,0x03,0x1E,0x04,0x92,0x80,0x00,0x41,0x32,0x36,0x01,0x11,0xDF];
+    let mut index=1;
+    loop {
+        let (next_exists, count) = AnswerToReset::next_tables(atr[index]);
+        index += count;
+        if !next_exists {
+            index += 1;
+            break;
+        }
+    }
+    assert_eq!(index,9);
 }
