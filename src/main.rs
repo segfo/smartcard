@@ -1,4 +1,4 @@
-mod apdu_iso7816;
+mod apdu_contactless;
 mod nfc_impl;
 mod pc_sc_standard;
 mod smart_card;
@@ -22,7 +22,7 @@ fn main() {
         NfcFactory::create_nfc_instance(nfc_impl::FactoryType::WindowsScardAPI);
     nfc.connect_reader(smart_card::SmartcardConnectMethod::UserPrompt)
         .unwrap();
-    let apdu = apdu_iso7816::ApduBuilder::new().get_card_kind().build();
+    let apdu = apdu_contactless::ApduBuilder::new().get_card_kind().build();
     let card_kind = match nfc.transmit(Box::new(apdu)) {
         Ok(card_kind) => CardType::from(card_kind[0]),
         Err(_) => CardType::UnknownCard,
@@ -61,7 +61,7 @@ fn show_card_info(nfc: &mut Box<dyn Smartcard>, card_type: CardType) {
         "    管理情報バイト: {}",
         hex_dump(atr.historical_data.as_ref().unwrap())
     );
-    let apdu = apdu_iso7816::ApduBuilder::new().get_serial().build();
+    let apdu = apdu_contactless::ApduBuilder::new().get_serial().build();
     let mode_str = match nfc.config_protocol(ProtocolType::InActive) {
         Some(ProtocolType::T1) => "T1(ブロック転送モード)",
         Some(ProtocolType::T0) => "T0(キャラクタ転送モード)",
@@ -69,7 +69,6 @@ fn show_card_info(nfc: &mut Box<dyn Smartcard>, card_type: CardType) {
         _ => "<不明なプロトコルです>",
     };
     println!("確立したプロトコル: {}", mode_str);
-    let result = nfc.transmit(Box::new(apdu)).unwrap();
     let i = match card_kind_num {
         1 => 1,
         4 => 2,
@@ -77,12 +76,14 @@ fn show_card_info(nfc: &mut Box<dyn Smartcard>, card_type: CardType) {
         _ => 0,
     };
 
-    println!(
-        "{}: {}",
-        ["固有ID", "UID", "IDm", "PUPI"][i],
-        hex_dump(&result)
-    );
-    let apdu = apdu_iso7816::ApduBuilder::new().get_ats().build();
+    if let Ok(result) = nfc.transmit(Box::new(apdu)) {
+        println!(
+            "{}: {}",
+            ["固有ID", "UID", "IDm", "PUPI"][i],
+            hex_dump(&result)
+        );
+    }
+    let apdu = apdu_contactless::ApduBuilder::new().get_ats().build();
     match nfc.transmit(Box::new(apdu)) {
         Ok(ats) => {
             if ats.len() > 0 {
@@ -108,22 +109,33 @@ fn show_card_info(nfc: &mut Box<dyn Smartcard>, card_type: CardType) {
     } else {
         println!("カード種別: 不明({:02x})", card_kind_num);
     }
-    let apdu = apdu_iso7816::ApduBuilder::new().get_card_name().build();
-    let card_name = nfc.transmit(Box::new(apdu)).unwrap();
-    if card_name.len() > 0 {
-        println!("カード名: {}", String::from_utf8(card_name).unwrap());
+    let apdu = apdu_contactless::ApduBuilder::new().get_card_name().build();
+    if let Ok(card_name) = nfc.transmit(Box::new(apdu)) {
+        if card_name.len() > 0 {
+            println!("カード名: {}", String::from_utf8(card_name).unwrap());
+        }
     }
-    let apdu = apdu_iso7816::ApduBuilder::new()
+    let apdu = apdu_contactless::ApduBuilder::new()
         .get_card_kind_name()
         .build();
-    let kind_name = nfc.transmit(Box::new(apdu)).unwrap();
-    if kind_name.len() > 0 {
-        println!("種別名: {}", String::from_utf8(kind_name).unwrap());
+    if let Ok(kind_name) = nfc.transmit(Box::new(apdu)) {
+        if kind_name.len() > 0 {
+            println!("種別名: {}", String::from_utf8(kind_name).unwrap());
+        }else{
+            println!("種別名: 不明");
+        }
+    }else{
+        println!("種別名: 不明");
     }
-    let apdu = apdu_iso7816::ApduBuilder::new().get_card_id().build();
-    let card_id = nfc.transmit(Box::new(apdu)).unwrap();
-    if card_id.len() > 0 {
-        println!("カードID: {}", hex_dump(&card_id));
+    let apdu = apdu_contactless::ApduBuilder::new().get_card_id().build();
+    if let Ok(card_id) = nfc.transmit(Box::new(apdu)) {
+        if card_id.len() > 0 {
+            println!("カードID: {}", hex_dump(&card_id));
+        }else{
+            println!("カードID: 不明");
+        }
+    }else{
+        println!("カードID: 不明");
     }
 }
 

@@ -1,6 +1,6 @@
 // PC/SC規格に準拠したカードとの通信に関わる定義を記述していく
 
-use crate::apdu_iso7816;
+use crate::apdu_contactless;
 
 #[derive(Debug, Clone)]
 pub struct AnswerToReset {
@@ -24,11 +24,8 @@ pub enum CardName {
     TopazJewel,
     Felica,
     Jcop30,
-    JpPublicTransitIc,
-    JpMynaCard,
-    JpDrivingLicenseCard,
     OtherTag,
-    UnknownTagName
+    UnknownTagName,
 }
 #[derive(Debug, Clone, PartialEq)]
 pub enum CardType {
@@ -112,7 +109,15 @@ impl From<usize> for CardType {
         }
     }
 }
+use serde::*;
+#[derive(Debug, Serialize, Deserialize)]
+struct AtrData {
+    atr: Vec<u8>,
+    description: Option<String>,
+}
 
+use once_cell::sync::Lazy;
+use std::{collections::HashMap, sync::Mutex};
 impl AnswerToReset {
     pub fn new(atr: &[u8; 32]) -> Result<Self, Box<dyn std::error::Error>> {
         if atr[0] != 0x3B {
@@ -133,7 +138,7 @@ impl AnswerToReset {
             None => None,
         }
     }
-    const unknown_tag: &str = "Unknown Tag Name";
+    const UNKNOWN_TAG: &str = "Unknown Tag Name";
     fn next_tables(atr: u8) -> (bool, usize) {
         let flags = atr >> 0x04 & 0x0f;
         let mut count = 0;
@@ -160,38 +165,49 @@ impl AnswerToReset {
         let historical_data = atr[index..index + historical_bytes].to_vec();
         let card_name = match (atr[13], atr[14]) {
             (0x00, v) => match v {
-                0x01 => ("MIFARE Classic 1K", CardName::MifareClassic1k),
-                0x02 => ("MIFARE Classic 4K", CardName::MifareClassic4k),
-                0x03 => ("MIFARE Ultralight", CardName::MifareUltralight),
-                0x07 => ("SRIX512", CardName::Srix512),
-                0x26 => ("MIFARE Mini", CardName::MifareMini),
-                0x36 => ("MIFARE Plus SL1 2K", CardName::MifarePlusSl12k),
-                0x37 => ("MIFARE Plus SL1 4K", CardName::MifarePlusSl14k),
-                0x38 => ("MIFARE Plus SL2 2K", CardName::MifarePlusSl12k),
-                0x39 => ("MIFARE Plus SL2 4K", CardName::MifarePlusSl14k),
-                0x3A => ("MIFARE Ultralight C", CardName::MifareUltralightC),
-                0x30 => ("Topaz/Jewel", CardName::TopazJewel),
-                0x3B => AnswerToReset::lookup_to_histdata(historical_data.clone()),//("FeliCa", CardName::Felica),
+                0x01 => ("MIFARE Classic 1K".to_owned(), CardName::MifareClassic1k),
+                0x02 => ("MIFARE Classic 4K".to_owned(), CardName::MifareClassic4k),
+                0x03 => ("MIFARE Ultralight".to_owned(), CardName::MifareUltralight),
+                0x07 => ("SRIX512".to_owned(), CardName::Srix512),
+                0x26 => ("MIFARE Mini".to_owned(), CardName::MifareMini),
+                0x36 => ("MIFARE Plus SL1 2K".to_owned(), CardName::MifarePlusSl12k),
+                0x37 => ("MIFARE Plus SL1 4K".to_owned(), CardName::MifarePlusSl14k),
+                0x38 => ("MIFARE Plus SL2 2K".to_owned(), CardName::MifarePlusSl12k),
+                0x39 => ("MIFARE Plus SL2 4K".to_owned(), CardName::MifarePlusSl14k),
+                0x3A => (
+                    "MIFARE Ultralight C".to_owned(),
+                    CardName::MifareUltralightC,
+                ),
+                0x30 => ("Topaz/Jewel".to_owned(), CardName::TopazJewel),
+                0x3B => AnswerToReset::lookup_to_histdata(historical_data.clone()), //("FeliCa", CardName::Felica),
                 _ => AnswerToReset::lookup_to_histdata(historical_data.clone()),
             },
-            (0xFF, 28) => ("JCOP 30", CardName::Jcop30),
-            _ => (Self::unknown_tag, CardName::UnknownTagName),
+            (0xFF, 28) => ("JCOP 30".to_owned(), CardName::Jcop30),
+            _ => AnswerToReset::lookup_to_histdata(historical_data.clone()),
         };
-        (historical_data, (card_name.0.to_owned(), card_name.1))
+        (historical_data, (card_name.0, card_name.1))
     }
-    const LOOKUP_TABLE:&'static[(&'static[u8],&'static str,CardName)] = &[
-        (&[0x00,0x00,0x00,0x00,0x91,0x81,0xc1,0x00],"Driving License card of Japan",CardName::JpDrivingLicenseCard),
-        (&[0x00,0x00,0x41,0xe0,0xb3,0x81,0xa1,0x00],"ID card issued by Japan government(aka My-number card)",CardName::JpMynaCard),
-        (&[0x00,0x00,0x05,0xE0,0xB3,0x81,0xA1,0x00],"Japanese JPKI card (aka JINC card)",CardName::JpMynaCard),
-        (&[0x80,0x4f,0x0c,0xa0,0x00,0x00,0x03,0x06,0x11,0x00,0x3b,0x00,0x00,0x00,0x00],"public transit card (Japan IC System)",CardName::JpPublicTransitIc)
-    ];
-    fn lookup_to_histdata(histrical_data: Vec<u8>) -> (&'static str, CardName) {
-        for search in Self::LOOKUP_TABLE{
-            if histrical_data == search.0{
-                return (search.1,search.2.clone())
-            }
+
+    const LOOKUP_TABLE: Lazy<Mutex<HashMap<Vec<u8>, String>>> = Lazy::new(|| {
+        let mut hm = HashMap::new();
+        let list = include_str!("../smartcard_list.json");
+        let atr_list: Vec<AtrData> = serde_json::from_str(list).unwrap();
+        for atr in atr_list {
+            hm.insert(atr.atr, atr.description.unwrap());
         }
-        (Self::unknown_tag, CardName::UnknownTagName)
+        Mutex::new(hm)
+    });
+    fn lookup_to_histdata(historical_data: Vec<u8>) -> (String, CardName) {
+        let lookup_tbl = Self::LOOKUP_TABLE;
+        let lookup_tbl = lookup_tbl.lock().unwrap();
+        if lookup_tbl.contains_key(&historical_data) {
+            (
+                lookup_tbl.get(&historical_data).unwrap().to_owned(),
+                CardName::OtherTag,
+            )
+        } else {
+            (Self::UNKNOWN_TAG.to_owned(), CardName::UnknownTagName)
+        }
     }
     pub fn historical_data_to_string(&self) -> String {
         let mut s = self
@@ -274,9 +290,12 @@ pub trait MifareExt {
 }
 
 #[test]
-fn atr_parse1(){
-    let atr=[0x3B,0x88,0x8E,0xFE,0x53,0x2A,0x03,0x1E,0x04,0x92,0x80,0x00,0x41,0x32,0x36,0x01,0x11,0xDF];
-    let mut index=1;
+fn atr_parse1() {
+    let atr = [
+        0x3B, 0x88, 0x8E, 0xFE, 0x53, 0x2A, 0x03, 0x1E, 0x04, 0x92, 0x80, 0x00, 0x41, 0x32, 0x36,
+        0x01, 0x11, 0xDF,
+    ];
+    let mut index = 1;
     loop {
         let (next_exists, count) = AnswerToReset::next_tables(atr[index]);
         index += count;
@@ -285,5 +304,5 @@ fn atr_parse1(){
             break;
         }
     }
-    assert_eq!(index,9);
+    assert_eq!(index, 9);
 }

@@ -93,7 +93,7 @@ impl WinScardNFC {
         };
         Ok(card_list)
     }
-    // TODO : 後でいい感じに標準入力（数値）実装する
+    
     fn show_user_prompt(reader_list: &Vec<String>) -> Option<usize> {
         let mut idx = 0;
         let reader_cnt = reader_list.len();
@@ -104,7 +104,7 @@ impl WinScardNFC {
         }
         println!("Reader# : ReaderName");
         for reader in reader_list {
-            println!("{} : {}", idx, reader);
+            println!("{:7} : {}", idx, reader);
             idx += 1;
         }
         // このあたりから入力のコードを書く
@@ -280,7 +280,7 @@ impl smart_card::Smartcard for WinScardNFC {
                 id_string
             }
         };
-
+        // 選択したリーダーに接続する
         unsafe {
             let wait_target: Vec<u16> = OsStr::new(reader_string)
                 .encode_wide()

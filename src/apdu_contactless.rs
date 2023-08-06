@@ -158,6 +158,7 @@ impl ApduBuilderExtWithFelica for ApduBuilder{
     }
 }
 
+#[derive(Debug)]
 pub struct Apdu {
     cla: u8,
     ins: u8,
